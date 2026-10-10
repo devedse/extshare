@@ -14,7 +14,7 @@ object TestSettings {
         WHOLE_SCREEN to true,
         KEEP_CAPTURE to true,
         AUTO_REOPEN to true,
-        AUTO_PIP to false
+        AUTO_PIP to true
     )
 
     fun get(context: Context, key: String): Boolean =

@@ -71,6 +71,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         }
         if (!isRunning.get()) {
             isRunning.set(true)
+            onStateChanged?.invoke()
         }
         useExternalSurface = intent?.getBooleanExtra(EXTRA_EXTERNAL_SURFACE, false) ?: useExternalSurface
         instance = this
@@ -94,6 +95,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         DebugLog.log(TAG, "Service stopped")
         releaseAll()
         isRunning.set(false)
+        onStateChanged?.invoke()
         retryHandler.removeCallbacksAndMessages(null)
         stopForeground(STOP_FOREGROUND_REMOVE)
         updateTileState()
@@ -358,6 +360,9 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         private const val EXTRA_RESULT_CODE = "result_code"
         private const val EXTRA_RESULT_DATA = "result_data"
         val isRunning: AtomicBoolean = AtomicBoolean(false)
+
+        /** Main-thread listener for start/stop, used by MainActivity to refresh its UI. */
+        var onStateChanged: (() -> Unit)? = null
 
         // Main-thread only: the running service and the surface handed over by RearDisplayMirror.
         private var instance: MirrorService? = null

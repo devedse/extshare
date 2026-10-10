@@ -1,8 +1,15 @@
 package org.arnor.extshare
 
+import android.app.PendingIntent
 import android.app.PictureInPictureParams
+import android.app.RemoteAction
+import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.graphics.drawable.Icon
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjectionManager
@@ -17,6 +24,7 @@ import android.widget.CompoundButton
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.content.getSystemService
 import androidx.lifecycle.Lifecycle
 import org.arnor.extshare.databinding.ActivityMainBinding
@@ -40,6 +48,14 @@ class MainActivity : AppCompatActivity() {
                 binding.eventLog.text = log
             }
             handler.postDelayed(this, 1000L)
+        }
+    }
+
+    // Stop action shown in the picture-in-picture controls.
+    private val stopReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context, intent: Intent) {
+            DebugLog.log(TAG, "Stop tapped in picture-in-picture")
+            stopMirroring()
         }
     }
 
@@ -84,11 +100,12 @@ class MainActivity : AppCompatActivity() {
 
         binding.stopButton.setOnClickListener {
             DebugLog.log(TAG, "Stop tapped")
-            pendingRearStart = false
-            rearMirror.stop()
-            MirrorService.stop(this)
-            renderState()
+            stopMirroring()
         }
+
+        ContextCompat.registerReceiver(
+            this, stopReceiver, IntentFilter(ACTION_STOP_MIRRORING), ContextCompat.RECEIVER_NOT_EXPORTED
+        )
 
         binding.testButton.setOnClickListener {
             runExternalDisplayTest()
@@ -130,14 +147,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    override fun onDestroy() {
+        super.onDestroy()
+        unregisterReceiver(stopReceiver)
+    }
+
+    private fun stopMirroring() {
+        pendingRearStart = false
+        rearMirror.stop()
+        MirrorService.stop(this)
+        renderState()
+    }
+
     override fun onStart() {
         super.onStart()
+        MirrorService.onStateChanged = { renderState() }
+        renderState()
         handler.post(logRefresher)
     }
 
     override fun onStop() {
         super.onStop()
         DebugLog.log(TAG, "Activity stopped")
+        MirrorService.onStateChanged = null
         handler.removeCallbacks(logRefresher)
     }
 
@@ -172,21 +204,39 @@ class MainActivity : AppCompatActivity() {
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
         DebugLog.log(TAG, "Picture-in-picture mode=$isInPictureInPictureMode")
+        binding.mainContent.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
+        binding.pipContent.visibility = if (isInPictureInPictureMode) View.VISIBLE else View.GONE
         maybeReopenCover()
     }
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
         // Android 12+ enters PiP automatically via setAutoEnterEnabled.
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && TestSettings.get(this, TestSettings.AUTO_PIP)) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && shouldAutoPip()) {
             enterPip("leaving app")
         }
     }
 
+    /** Picture-in-picture keeps ExtShare visible, which keeps the cover session alive in other apps. */
+    private fun shouldAutoPip(): Boolean =
+        TestSettings.get(this, TestSettings.AUTO_PIP) && MirrorService.isRunning.get()
+
     private fun pipParams(): PictureInPictureParams {
-        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(3, 4))
+        // A wide window keeps the picture-in-picture overlay small.
+        val builder = PictureInPictureParams.Builder().setAspectRatio(Rational(2, 1))
+        if (MirrorService.isRunning.get()) {
+            val stopIntent = PendingIntent.getBroadcast(
+                this, 0, Intent(ACTION_STOP_MIRRORING).setPackage(packageName), PendingIntent.FLAG_IMMUTABLE
+            )
+            val stopTitle = getString(R.string.pip_stop)
+            builder.setActions(listOf(
+                RemoteAction(Icon.createWithResource(this, R.drawable.ic_stop), stopTitle, stopTitle, stopIntent)
+            ))
+        } else {
+            builder.setActions(emptyList())
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            builder.setAutoEnterEnabled(TestSettings.get(this, TestSettings.AUTO_PIP))
+            builder.setAutoEnterEnabled(shouldAutoPip())
         }
         return builder.build()
     }
@@ -261,6 +311,13 @@ class MainActivity : AppCompatActivity() {
             running -> "Your main display should now be mirrored onto the external display."
             else -> "Tap Start or use the Quick Settings tile. Android asks for screen-capture permission each time."
         }
+        binding.pipStatus.text = when {
+            !running -> getString(R.string.status_ready)
+            coverDark -> getString(R.string.pip_cover_off)
+            else -> getString(R.string.pip_mirroring)
+        }
+        updatePipParams()
+
         if (binding.testResult.text.isNullOrEmpty()) {
             binding.testResult.text = "${getString(R.string.test_result_prefix)} Not run yet."
         }
@@ -312,5 +369,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REOPEN_INTERVAL_MS = 5000L
+        private const val ACTION_STOP_MIRRORING = "org.arnor.extshare.STOP_MIRRORING"
     }
 }
