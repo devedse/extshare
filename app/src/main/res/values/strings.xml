@@ -25,6 +25,7 @@
     <string name="lab_keep_capture">Keep capturing when the cover session ends</string>
     <string name="lab_auto_reopen">Reopen the cover when ExtShare is visible again</string>
     <string name="lab_auto_pip">Shrink to picture-in-picture when leaving ExtShare while mirroring (keeps the cover on)</string>
+    <string name="lab_floating_bubble">Experiment: floating button instead of picture-in-picture (needs \"Display over other apps\")</string>
     <string name="lab_enter_pip">Enter picture-in-picture now</string>
     <string name="lab_copy_log">Copy log</string>
     <string name="lab_clear_log">Clear log</string>

@@ -9,12 +9,14 @@ object TestSettings {
     const val KEEP_CAPTURE = "keep_capture"
     const val AUTO_REOPEN = "auto_reopen"
     const val AUTO_PIP = "auto_pip"
+    const val FLOATING_BUBBLE = "floating_bubble"
 
     private val defaults = mapOf(
         WHOLE_SCREEN to true,
         KEEP_CAPTURE to true,
         AUTO_REOPEN to true,
-        AUTO_PIP to true
+        AUTO_PIP to true,
+        FLOATING_BUBBLE to false
     )
 
     fun get(context: Context, key: String): Boolean =

@@ -93,6 +93,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         displayManager.unregisterDisplayListener(this)
         if (instance === this) instance = null
         DebugLog.log(TAG, "Service stopped")
+        FloatingBubble.hide(this)
         releaseAll()
         isRunning.set(false)
         onStateChanged?.invoke()

@@ -13,11 +13,13 @@ import android.graphics.drawable.Icon
 import android.content.res.Configuration
 import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjectionManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.Settings
 import android.util.Rational
 import android.view.View
 import android.widget.CompoundButton
@@ -133,6 +135,13 @@ class MainActivity : AppCompatActivity() {
         bindSwitch(binding.keepCapture, TestSettings.KEEP_CAPTURE)
         bindSwitch(binding.autoReopen, TestSettings.AUTO_REOPEN)
         bindSwitch(binding.autoPip, TestSettings.AUTO_PIP) { updatePipParams() }
+        bindSwitch(binding.floatingBubble, TestSettings.FLOATING_BUBBLE) {
+            if (TestSettings.get(this, TestSettings.FLOATING_BUBBLE) && !FloatingBubble.canShow(this)) {
+                DebugLog.log(TAG, "Opening overlay permission settings")
+                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
+            }
+            updatePipParams()
+        }
         updatePipParams()
 
         binding.enterPip.setOnClickListener { enterPip("button") }
@@ -160,6 +169,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun stopMirroring() {
+        FloatingBubble.hide(this)
         pendingRearStart = false
         pendingOneAppConsent = false
         rearMirror.stop()
@@ -169,6 +179,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onStart() {
         super.onStart()
+        FloatingBubble.hide(this)
         MirrorService.onStateChanged = { renderState() }
         renderState()
         handler.post(logRefresher)
@@ -177,6 +188,7 @@ class MainActivity : AppCompatActivity() {
     override fun onStop() {
         super.onStop()
         DebugLog.log(TAG, "Activity stopped")
+        if (MirrorService.isRunning.get() && useBubble()) FloatingBubble.show(this)
         MirrorService.onStateChanged = null
         handler.removeCallbacks(logRefresher)
     }
@@ -231,7 +243,11 @@ class MainActivity : AppCompatActivity() {
 
     /** Picture-in-picture keeps ExtShare visible, which keeps the cover session alive in other apps. */
     private fun shouldAutoPip(): Boolean =
-        TestSettings.get(this, TestSettings.AUTO_PIP) && MirrorService.isRunning.get()
+        TestSettings.get(this, TestSettings.AUTO_PIP) && MirrorService.isRunning.get() && !useBubble()
+
+    /** The floating-button experiment replaces picture-in-picture when enabled and permitted. */
+    private fun useBubble(): Boolean =
+        TestSettings.get(this, TestSettings.FLOATING_BUBBLE) && FloatingBubble.canShow(this)
 
     private fun pipParams(): PictureInPictureParams {
         // A wide window keeps the picture-in-picture overlay small.

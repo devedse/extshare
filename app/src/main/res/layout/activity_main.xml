@@ -186,6 +186,13 @@
                     android:text="@string/lab_auto_pip"
                     android:textColor="@color/md_theme_on_surface" />
 
+                <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/floatingBubble"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="@string/lab_floating_bubble"
+                    android:textColor="@color/md_theme_on_surface" />
+
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/enterPip"
                     style="@style/Widget.MaterialComponents.Button.OutlinedButton"
