@@ -26,8 +26,6 @@ jobs:
     needs: [generate_version_number]
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    outputs:
-      release_signed: ${{ steps.signing.outputs.configured }}
     env:
       BUILD_NUMBER: ${{ needs.generate_version_number.outputs.build_number }}
       BUILD_VERSION: 1.0.${{ needs.generate_version_number.outputs.build_number }}
@@ -45,8 +43,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Detect signing configuration
-        id: signing
+      - name: Write release keystore if configured
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -56,18 +53,12 @@ jobs:
         run: |
           if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
             echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
-            echo "configured=true" >> "$GITHUB_OUTPUT"
           else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Signing secrets not set; APK will be signed with the debug key."
           fi
 
-      - name: Build debug-signed Android APK
-        if: steps.signing.outputs.configured != 'true'
-        shell: bash
-        run: ./gradlew assembleRelease --no-daemon
-
-      - name: Build release-signed Android APK
-        if: steps.signing.outputs.configured == 'true'
+      # Gradle signs with the release keystore only if it was written above, else the debug key.
+      - name: Build Android APK
         shell: bash
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
@@ -92,12 +83,12 @@ jobs:
 
   release:
     needs: [generate_version_number, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.release_signed == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Download signed APK
+      - name: Download APK
         uses: actions/download-artifact@v8
         with:
           name: ExtShare-Android-1.0.${{ needs.generate_version_number.outputs.build_number }}
