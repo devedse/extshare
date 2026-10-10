@@ -13,7 +13,7 @@ class RequestPermissionActivity : ComponentActivity() {
     private val launcher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
-                ProjectionStore.saveGrant(this, result.resultCode, result.data!!)
+                ProjectionStore.saveGrant(result.resultCode, result.data!!)
                 MirrorService.start(this)
                 Toast.makeText(this, "Mirroring enabled.", Toast.LENGTH_SHORT).show()
             } else {

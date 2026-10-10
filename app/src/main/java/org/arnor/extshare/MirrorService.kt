@@ -51,7 +51,9 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (!ProjectionStore.hasGrant(this)) {
+        if (mediaProjection == null && !ProjectionStore.hasGrant()) {
+            // Also hit when the system restarts the service: consent can't be reused.
+            DebugLog.log(TAG, "No screen-capture consent available; stopping.")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -60,6 +62,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         }
         useExternalSurface = intent?.getBooleanExtra(EXTRA_EXTERNAL_SURFACE, false) ?: useExternalSurface
         instance = this
+        DebugLog.log(TAG, "Service started (rearDisplay=$useExternalSurface)")
         if (!useExternalSurface) {
             val dualMsg = DualScreenHelper.attemptEnableDualScreen()
             Log.d(TAG, "Dual screen toggle attempt: $dualMsg")
@@ -67,13 +70,14 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         startForeground(notificationId, buildNotification())
         startProjection()
         updateTileState()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
         super.onDestroy()
         displayManager.unregisterDisplayListener(this)
         if (instance === this) instance = null
+        DebugLog.log(TAG, "Service stopped")
         releaseAll()
         isRunning.set(false)
         retryHandler.removeCallbacksAndMessages(null)
@@ -85,20 +89,35 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
 
     private fun startProjection() {
         if (mediaProjection != null) return
-        val grant = ProjectionStore.loadGrant(this)
+        val grant = ProjectionStore.takeGrant()
         val manager = getSystemService(MediaProjectionManager::class.java)
         if (grant == null || manager == null) {
+            DebugLog.log(TAG, "Missing consent or MediaProjectionManager; stopping.")
             stopSelf()
             return
         }
-        mediaProjection = manager.getMediaProjection(grant.resultCode, grant.dataIntent)
-        mediaProjection?.registerCallback(object : MediaProjection.Callback() {
+        val projection = try {
+            manager.getMediaProjection(grant.resultCode, grant.dataIntent)
+        } catch (t: Throwable) {
+            DebugLog.log(TAG, "getMediaProjection failed", t)
+            null
+        }
+        if (projection == null) {
+            DebugLog.log(TAG, "getMediaProjection returned null; stopping.")
+            stopSelf()
+            return
+        }
+        DebugLog.log(TAG, "MediaProjection obtained")
+        mediaProjection = projection
+        projection.registerCallback(object : MediaProjection.Callback() {
             override fun onStop() {
+                DebugLog.log(TAG, "MediaProjection stopped by system")
                 stopSelf()
             }
         }, null)
         if (useExternalSurface) {
             externalSurface?.let { attachVirtualDisplay(it) }
+                ?: DebugLog.log(TAG, "Waiting for rear-display surface")
         } else {
             startPresentation()
         }
@@ -108,7 +127,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         retryHandler.removeCallbacksAndMessages(null)
         val display = chooseExternalDisplay()
         if (display == null) {
-            Log.w(TAG, "No external display found; waiting for one to appear.")
+            DebugLog.log(TAG, "No external display found; waiting for one to appear.")
             targetDisplayId = null
             scheduleRetry()
             return
@@ -130,9 +149,9 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         )
         try {
             presentation?.show()
-            Log.d(TAG, "Presentation shown on display ${display.displayId} ${display.name}")
+            DebugLog.log(TAG, "Presentation shown on display ${display.displayId} ${display.name}")
         } catch (t: Throwable) {
-            Log.e(TAG, "Failed to show presentation on display ${display.displayId}", t)
+            DebugLog.log(TAG, "Failed to show presentation on display ${display.displayId}", t)
             stopSelf()
         }
     }
@@ -141,9 +160,17 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         val projection = mediaProjection ?: return
         val targetDisplay = targetDisplayId?.let { displayManager.getDisplay(it) }
         val sourceMetrics = mainDisplayMetrics() ?: return
+        var width = sourceMetrics.widthPixels
+        var height = sourceMetrics.heightPixels
 
-        // Rear-display sessions already size the surface to the cover panel.
-        if (!useExternalSurface) {
+        if (useExternalSurface) {
+            // Render at the cover panel's size; the mirror is letterboxed into it.
+            val frame = holder.surfaceFrame
+            if (frame.width() > 0 && frame.height() > 0) {
+                width = frame.width()
+                height = frame.height()
+            }
+        } else {
             val targetMetrics = displayMetricsFor(targetDisplay) ?: sourceMetrics
             // Match the surface to the external panel; capture uses the main display size.
             holder.setFixedSize(
@@ -154,8 +181,9 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
 
         // Android 14+ allows only one createVirtualDisplay per MediaProjection; reuse it.
         virtualDisplay?.let {
+            it.resize(width, height, sourceMetrics.densityDpi)
             it.surface = holder.surface
-            Log.d(TAG, "Re-targeted virtual display to surface ${holder.surfaceFrame}")
+            DebugLog.log(TAG, "Re-targeted virtual display to ${width}x$height")
             return
         }
         Log.d(
@@ -164,26 +192,32 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
                 "${sourceMetrics.densityDpi} targetSurface=${holder.surfaceFrame} " +
                 "displayId=$targetDisplay external=$useExternalSurface"
         )
-        virtualDisplay = projection.createVirtualDisplay(
-            "mirror-virtual-display",
-            sourceMetrics.widthPixels,
-            sourceMetrics.heightPixels,
-            sourceMetrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_PUBLIC or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_PRESENTATION or
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_SECURE,
-            holder.surface,
-            object : VirtualDisplay.Callback() {
-                override fun onStopped() {
-                    Log.w(TAG, "Virtual display stopped")
-                    stopSelf()
-                }
-            },
+        virtualDisplay = try {
+            projection.createVirtualDisplay(
+                "mirror-virtual-display",
+                width,
+                height,
+                sourceMetrics.densityDpi,
+                // AUTO_MIRROR mirrors the default display. SECURE would need a system permission.
+                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                holder.surface,
+                object : VirtualDisplay.Callback() {
+                    override fun onStopped() {
+                        DebugLog.log(TAG, "Virtual display stopped")
+                        stopSelf()
+                    }
+                },
+                null
+            )
+        } catch (t: Throwable) {
+            DebugLog.log(TAG, "createVirtualDisplay failed", t)
             null
-        )
+        }
         if (virtualDisplay == null) {
-            Log.w(TAG, "Failed to create virtual display; stopping.")
+            DebugLog.log(TAG, "Failed to create virtual display; stopping.")
             stopSelf()
+        } else {
+            DebugLog.log(TAG, "Virtual display created ${width}x$height")
         }
     }
 

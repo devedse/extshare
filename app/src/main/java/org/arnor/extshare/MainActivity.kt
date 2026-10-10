@@ -5,6 +5,7 @@ import android.media.projection.MediaProjectionManager
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.View
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -19,7 +20,7 @@ class MainActivity : AppCompatActivity() {
     private val requestProjectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
-                ProjectionStore.saveGrant(this, result.resultCode, result.data!!)
+                ProjectionStore.saveGrant(result.resultCode, result.data!!)
                 startMirroring()
                 Toast.makeText(this, "Mirroring enabled.", Toast.LENGTH_SHORT).show()
             } else {
@@ -44,7 +45,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.startButton.setOnClickListener {
-            if (ProjectionStore.hasGrant(this)) {
+            if (ProjectionStore.hasGrant()) {
                 startMirroring()
             } else {
                 requestMediaProjection()
@@ -90,23 +91,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderState() {
-        val hasGrant = ProjectionStore.hasGrant(this)
         val running = MirrorService.isRunning.get()
 
-        binding.requestPermission.isEnabled = true
-        binding.startButton.isEnabled = hasGrant && !running
+        // Start asks for screen-capture consent itself; consent can't be reused between sessions.
+        binding.requestPermission.visibility = View.GONE
+        binding.startButton.isEnabled = !running
         binding.stopButton.isEnabled = running
 
-        binding.statusLabel.text = when {
-            running -> getString(R.string.status_running)
-            hasGrant -> getString(R.string.status_ready)
-            else -> getString(R.string.status_missing_permission)
-        }
+        binding.statusLabel.text = getString(if (running) R.string.status_running else R.string.status_ready)
 
         binding.statusDetails.text = when {
             running -> "Your main display should now be mirrored onto the external display."
-            hasGrant -> "Tap Start or use the Quick Settings tile to mirror whenever the cover display is available."
-            else -> "Tap Grant screen capture to allow mirroring to the external/cover display."
+            else -> "Tap Start or use the Quick Settings tile. Android asks for screen-capture permission each time."
         }
         if (binding.testResult.text.isNullOrEmpty()) {
             binding.testResult.text = "${getString(R.string.test_result_prefix)} Not run yet."
@@ -123,7 +119,8 @@ class MainActivity : AppCompatActivity() {
 
         val external = DisplayProbe.pickExternalDisplay(this)
 
-        val methodDetails = DualScreenHelper.describeDualMethods()
+        // Recent service/session events make failures visible without adb.
+        val methodDetails = "Recent events:\n${DebugLog.dump()}"
         val details = "${rearMirror.describe()}\n${probe.report}"
 
         if (rearMirror.isAvailable) {

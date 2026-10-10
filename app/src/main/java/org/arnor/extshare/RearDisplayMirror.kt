@@ -1,10 +1,16 @@
 package org.arnor.extshare
 
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Binder
-import android.util.Log
+import android.view.Gravity
 import android.view.SurfaceHolder
 import android.view.SurfaceView
+import android.view.View
+import android.view.ViewGroup.LayoutParams.MATCH_PARENT
+import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
+import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.activity.ComponentActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -57,7 +63,7 @@ class RearDisplayMirror(
                         ?.getCapability(WindowAreaCapability.Operation.OPERATION_PRESENT_ON_AREA)
                         ?.status
                         ?: WindowAreaCapability.Status.WINDOW_AREA_STATUS_UNSUPPORTED
-                    Log.d(TAG, "Rear window areas=${infos.size}, present status=$status")
+                    DebugLog.log(TAG, "Rear window areas=${infos.size}, present status=$status")
                     onChanged()
                 }
             }
@@ -84,29 +90,43 @@ class RearDisplayMirror(
     }
 
     override fun onSessionStarted(session: WindowAreaSessionPresenter) {
-        Log.d(TAG, "Rear presentation session started")
+        DebugLog.log(TAG, "Rear presentation session started")
         this.session = session
         val surfaceView = SurfaceView(session.context)
         surfaceView.holder.setFormat(PixelFormat.RGBA_8888)
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
             override fun surfaceCreated(holder: SurfaceHolder) {
+                DebugLog.log(TAG, "Rear surface created ${holder.surfaceFrame}")
                 MirrorService.attachExternalSurface(holder)
             }
 
             override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
+                DebugLog.log(TAG, "Rear surface changed ${width}x$height")
                 MirrorService.attachExternalSurface(holder)
             }
 
             override fun surfaceDestroyed(holder: SurfaceHolder) {
+                DebugLog.log(TAG, "Rear surface destroyed")
                 MirrorService.detachExternalSurface()
             }
         })
-        session.setContentView(surfaceView)
+        // Briefly label the cover so it's clear the window renders even if no frames arrive.
+        val label = TextView(session.context).apply {
+            text = "ExtShare cover window"
+            setTextColor(Color.WHITE)
+            setBackgroundColor(0x88000000.toInt())
+            setPadding(24, 12, 24, 12)
+        }
+        label.postDelayed({ label.visibility = View.GONE }, 5000L)
+        session.setContentView(FrameLayout(session.context).apply {
+            addView(surfaceView, FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT))
+            addView(label, FrameLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL))
+        })
         onChanged()
     }
 
     override fun onSessionEnded(t: Throwable?) {
-        Log.d(TAG, "Rear presentation session ended", t)
+        DebugLog.log(TAG, "Rear presentation session ended", t)
         session = null
         MirrorService.detachExternalSurface()
         onEnded()
@@ -114,7 +134,7 @@ class RearDisplayMirror(
     }
 
     override fun onContainerVisibilityChanged(isVisible: Boolean) {
-        Log.d(TAG, "Rear presentation visible=$isVisible")
+        DebugLog.log(TAG, "Rear presentation visible=$isVisible")
     }
 
     companion object {
