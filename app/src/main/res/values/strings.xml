@@ -15,4 +15,15 @@
     <string name="notification_title">External display mirroring running</string>
     <string name="notification_content">Your main screen is being mirrored to the external display.</string>
     <string name="test_result_prefix">External display test:</string>
+    <string name="lab_title">Test lab</string>
+    <string name="lab_capture_label">What Start captures:</string>
+    <string name="lab_capture_whole">Entire screen</string>
+    <string name="lab_capture_choose">Let me choose (one app or entire screen)</string>
+    <string name="lab_keep_capture">Keep capturing when the cover session ends</string>
+    <string name="lab_auto_reopen">Reopen the cover when ExtShare is visible again</string>
+    <string name="lab_auto_pip">Shrink to picture-in-picture when leaving ExtShare</string>
+    <string name="lab_enter_pip">Enter picture-in-picture now</string>
+    <string name="lab_copy_log">Copy log</string>
+    <string name="lab_clear_log">Clear log</string>
+    <string name="lab_instructions">Tap Clear log before each test, then Copy log afterwards and paste it to Claude.\n\nA. Pop-up: Stop, open ExtShare as a pop-up window (Recents → ExtShare icon → Open in pop-up view), tap Start, then use the app behind it.\nB. Split screen: same as A, with ExtShare in split screen.\nC. Picture-in-picture: turn on \"Shrink to picture-in-picture\", tap Start, press Home and open another app.\nD. One app: pick \"Let me choose\", tap Start and choose an app in Android\'s dialog. Combine with A, B or C.\nE. Coming back: after the cover goes dark, return to ExtShare. With \"Reopen\" on, the cover should come back without asking for permission again.</string>
 </resources>

@@ -34,7 +34,7 @@ class RequestPermissionActivity : ComponentActivity() {
             finish()
             return
         }
-        val intent: Intent = ProjectionStore.captureIntent(manager)
+        val intent: Intent = ProjectionStore.captureIntent(manager, TestSettings.get(this, TestSettings.WHOLE_SCREEN))
         launcher.launch(intent)
     }
 }

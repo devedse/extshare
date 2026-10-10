@@ -37,6 +37,8 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     private var targetDisplayId: Int? = null
     // True when the cover panel is driven by RearDisplayMirror instead of a Presentation.
     private var useExternalSurface = false
+    // Last logged state per display, so only real power changes are logged.
+    private val loggedDisplayStates = mutableMapOf<Int, Int>()
     private val retryRunnable = Runnable {
         if (isRunning.get()) {
             startPresentation()
@@ -113,6 +115,15 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
             override fun onStop() {
                 DebugLog.log(TAG, "MediaProjection stopped by system")
                 stopSelf()
+            }
+
+            // Android 14+: reports single-app capture size and whether the shared app is visible.
+            override fun onCapturedContentResize(width: Int, height: Int) {
+                DebugLog.log(TAG, "Captured content size ${width}x$height")
+            }
+
+            override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+                DebugLog.log(TAG, "Captured content visible=$isVisible")
             }
         }, null)
         if (useExternalSurface) {
@@ -287,19 +298,37 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
             .build()
     }
 
+    private fun logDisplayState(displayId: Int, event: String) {
+        val display = displayManager.getDisplay(displayId)
+        val state = display?.state ?: -1
+        if (event == "changed" && loggedDisplayStates[displayId] == state) return
+        loggedDisplayStates[displayId] = state
+        val stateName = when (state) {
+            Display.STATE_ON -> "ON"
+            Display.STATE_OFF -> "OFF"
+            Display.STATE_DOZE, Display.STATE_DOZE_SUSPEND -> "DOZE"
+            -1 -> "gone"
+            else -> state.toString()
+        }
+        DebugLog.log(TAG, "Display $displayId ${display?.name ?: ""} $event, state=$stateName")
+    }
+
     override fun onDisplayAdded(displayId: Int) {
+        logDisplayState(displayId, "added")
         if (!useExternalSurface && targetDisplayId == null) {
             startPresentation()
         }
     }
 
     override fun onDisplayRemoved(displayId: Int) {
+        logDisplayState(displayId, "removed")
         if (displayId == targetDisplayId) {
             stopSelf()
         }
     }
 
     override fun onDisplayChanged(displayId: Int) {
+        logDisplayState(displayId, "changed")
         if (displayId == targetDisplayId) {
             startPresentation()
         }
@@ -326,6 +355,10 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
                 .putExtra(EXTRA_EXTERNAL_SURFACE, externalSurface)
             ContextCompat.startForegroundService(context, intent)
         }
+
+        /** True while capturing for a rear-display session (attached or waiting for a surface). */
+        val isRearMode: Boolean
+            get() = instance?.useExternalSurface == true
 
         fun attachExternalSurface(holder: SurfaceHolder) {
             externalSurface = holder

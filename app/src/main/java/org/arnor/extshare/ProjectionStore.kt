@@ -26,10 +26,18 @@ object ProjectionStore {
 
     fun hasGrant(): Boolean = grant != null
 
-    /** Consent intent that captures the whole screen; without the config Android may offer only single-app sharing. */
-    fun captureIntent(manager: MediaProjectionManager): Intent =
+    /**
+     * Consent intent. [wholeScreen] forces capturing the default display; otherwise Android's picker
+     * lets the user share a single app or the entire screen.
+     */
+    fun captureIntent(manager: MediaProjectionManager, wholeScreen: Boolean): Intent =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+            val config = if (wholeScreen) {
+                MediaProjectionConfig.createConfigForDefaultDisplay()
+            } else {
+                MediaProjectionConfig.createConfigForUserChoice()
+            }
+            manager.createScreenCaptureIntent(config)
         } else {
             manager.createScreenCaptureIntent()
         }

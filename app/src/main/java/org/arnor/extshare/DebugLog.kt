@@ -12,7 +12,7 @@ import java.util.Locale
  * Persisted to a file so it survives crashes.
  */
 object DebugLog {
-    private const val MAX_LINES = 80
+    private const val MAX_LINES = 300
     private val lines = ArrayDeque<String>()
     private var file: File? = null
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
@@ -32,6 +32,12 @@ object DebugLog {
         lines.addLast("${timeFormat.format(Date())} $tag: $message$suffix")
         while (lines.size > MAX_LINES) lines.removeFirst()
         file?.let { f -> runCatching { f.writeText(lines.joinToString("\n")) } }
+    }
+
+    @Synchronized
+    fun clear() {
+        lines.clear()
+        file?.let { f -> runCatching { f.writeText("") } }
     }
 
     @Synchronized
