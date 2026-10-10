@@ -35,6 +35,8 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     private var virtualDisplay: VirtualDisplay? = null
     private var presentation: MirrorPresentation? = null
     private var targetDisplayId: Int? = null
+    // True when the cover panel is driven by RearDisplayMirror instead of a Presentation.
+    private var useExternalSurface = false
     private val retryRunnable = Runnable {
         if (isRunning.get()) {
             startPresentation()
@@ -56,8 +58,12 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         if (!isRunning.get()) {
             isRunning.set(true)
         }
-        val dualMsg = DualScreenHelper.attemptEnableDualScreen()
-        Log.d(TAG, "Dual screen toggle attempt: $dualMsg")
+        useExternalSurface = intent?.getBooleanExtra(EXTRA_EXTERNAL_SURFACE, false) ?: useExternalSurface
+        instance = this
+        if (!useExternalSurface) {
+            val dualMsg = DualScreenHelper.attemptEnableDualScreen()
+            Log.d(TAG, "Dual screen toggle attempt: $dualMsg")
+        }
         startForeground(notificationId, buildNotification())
         startProjection()
         updateTileState()
@@ -67,6 +73,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     override fun onDestroy() {
         super.onDestroy()
         displayManager.unregisterDisplayListener(this)
+        if (instance === this) instance = null
         releaseAll()
         isRunning.set(false)
         retryHandler.removeCallbacksAndMessages(null)
@@ -90,7 +97,11 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
                 stopSelf()
             }
         }, null)
-        startPresentation()
+        if (useExternalSurface) {
+            externalSurface?.let { attachVirtualDisplay(it) }
+        } else {
+            startPresentation()
+        }
     }
 
     private fun startPresentation() {
@@ -130,20 +141,28 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
         val projection = mediaProjection ?: return
         val targetDisplay = targetDisplayId?.let { displayManager.getDisplay(it) }
         val sourceMetrics = mainDisplayMetrics() ?: return
-        val targetMetrics = displayMetricsFor(targetDisplay) ?: sourceMetrics
 
-        // Match the surface to the external panel; capture uses the main display size.
-        holder.setFixedSize(
-            targetMetrics.widthPixels.coerceAtLeast(1),
-            targetMetrics.heightPixels.coerceAtLeast(1)
-        )
+        // Rear-display sessions already size the surface to the cover panel.
+        if (!useExternalSurface) {
+            val targetMetrics = displayMetricsFor(targetDisplay) ?: sourceMetrics
+            // Match the surface to the external panel; capture uses the main display size.
+            holder.setFixedSize(
+                targetMetrics.widthPixels.coerceAtLeast(1),
+                targetMetrics.heightPixels.coerceAtLeast(1)
+            )
+        }
 
-        detachVirtualDisplay()
+        // Android 14+ allows only one createVirtualDisplay per MediaProjection; reuse it.
+        virtualDisplay?.let {
+            it.surface = holder.surface
+            Log.d(TAG, "Re-targeted virtual display to surface ${holder.surfaceFrame}")
+            return
+        }
         Log.d(
             TAG,
             "Creating virtual display source=${sourceMetrics.widthPixels}x${sourceMetrics.heightPixels}@" +
-                "${sourceMetrics.densityDpi} targetSurface=${targetMetrics.widthPixels}x${targetMetrics.heightPixels} " +
-                "displayId=$targetDisplay"
+                "${sourceMetrics.densityDpi} targetSurface=${holder.surfaceFrame} " +
+                "displayId=$targetDisplay external=$useExternalSurface"
         )
         virtualDisplay = projection.createVirtualDisplay(
             "mirror-virtual-display",
@@ -169,12 +188,12 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     }
 
     private fun detachVirtualDisplay() {
-        virtualDisplay?.release()
-        virtualDisplay = null
+        virtualDisplay?.surface = null
     }
 
     private fun releaseAll() {
-        detachVirtualDisplay()
+        virtualDisplay?.release()
+        virtualDisplay = null
         presentation?.dismiss()
         presentation = null
         mediaProjection?.stop()
@@ -235,7 +254,7 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     }
 
     override fun onDisplayAdded(displayId: Int) {
-        if (targetDisplayId == null) {
+        if (!useExternalSurface && targetDisplayId == null) {
             startPresentation()
         }
     }
@@ -261,10 +280,27 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
 
     companion object {
         private const val TAG = "MirrorService"
+        private const val EXTRA_EXTERNAL_SURFACE = "external_surface"
         val isRunning: AtomicBoolean = AtomicBoolean(false)
 
-        fun start(context: Context) {
-            ContextCompat.startForegroundService(context, Intent(context, MirrorService::class.java))
+        // Main-thread only: the running service and the surface handed over by RearDisplayMirror.
+        private var instance: MirrorService? = null
+        private var externalSurface: SurfaceHolder? = null
+
+        fun start(context: Context, externalSurface: Boolean = false) {
+            val intent = Intent(context, MirrorService::class.java)
+                .putExtra(EXTRA_EXTERNAL_SURFACE, externalSurface)
+            ContextCompat.startForegroundService(context, intent)
+        }
+
+        fun attachExternalSurface(holder: SurfaceHolder) {
+            externalSurface = holder
+            instance?.takeIf { it.useExternalSurface }?.attachVirtualDisplay(holder)
+        }
+
+        fun detachExternalSurface() {
+            externalSurface = null
+            instance?.takeIf { it.useExternalSurface }?.detachVirtualDisplay()
         }
 
         fun stop(context: Context) {

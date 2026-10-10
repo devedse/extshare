@@ -14,12 +14,13 @@ import org.arnor.extshare.databinding.ActivityMainBinding
 class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
+    private lateinit var rearMirror: RearDisplayMirror
 
     private val requestProjectionLauncher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
                 ProjectionStore.saveGrant(this, result.resultCode, result.data!!)
-                MirrorService.start(this)
+                startMirroring()
                 Toast.makeText(this, "Mirroring enabled.", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Permission is required to mirror the screen.", Toast.LENGTH_SHORT).show()
@@ -32,13 +33,19 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        rearMirror = RearDisplayMirror(
+            activity = this,
+            onChanged = { renderState() },
+            onEnded = { if (MirrorService.isRunning.get()) MirrorService.stop(this) }
+        )
+
         binding.requestPermission.setOnClickListener {
             requestMediaProjection()
         }
 
         binding.startButton.setOnClickListener {
             if (ProjectionStore.hasGrant(this)) {
-                MirrorService.start(this)
+                startMirroring()
             } else {
                 requestMediaProjection()
             }
@@ -46,6 +53,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         binding.stopButton.setOnClickListener {
+            rearMirror.stop()
             MirrorService.stop(this)
             renderState()
         }
@@ -60,6 +68,16 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         renderState()
+    }
+
+    private fun startMirroring() {
+        // Foldables like the Galaxy Z Fold only power the cover panel through a rear-display session.
+        if (rearMirror.isAvailable) {
+            MirrorService.start(this, externalSurface = true)
+            rearMirror.start()
+        } else {
+            MirrorService.start(this)
+        }
     }
 
     private fun requestMediaProjection() {
@@ -106,7 +124,12 @@ class MainActivity : AppCompatActivity() {
         val external = DisplayProbe.pickExternalDisplay(this)
 
         val methodDetails = DualScreenHelper.describeDualMethods()
-        val details = probe.report
+        val details = "${rearMirror.describe()}\n${probe.report}"
+
+        if (rearMirror.isAvailable) {
+            setTestResult("Cover display is reachable via rear-display presentation; Start mirroring will use it.\n$details\n$methodDetails")
+            return
+        }
 
         if (external == null) {
             setTestResult("No external/cover display detected.\n$details\n$methodDetails")
@@ -116,7 +139,9 @@ class MainActivity : AppCompatActivity() {
         try {
             val presentation = DisplayTestPresentation(this, external)
             presentation.show()
-            setTestResult("Displayed test card on display ${external.displayId} (${external.name}).\n$details\n$methodDetails")
+            val listed = probe.primaryList.any { it.displayId == external.displayId }
+            val note = if (listed) "" else " Warning: this display is not in DisplayManager's active list, so it is likely powered off and nothing will appear."
+            setTestResult("Displayed test card on display ${external.displayId} (${external.name}).$note\n$details\n$methodDetails")
             Handler(Looper.getMainLooper()).postDelayed({ presentation.dismiss() }, 2000)
         } catch (t: Throwable) {
             setTestResult("Failed to present on display ${external.displayId}: ${t.message}\n$details\n$methodDetails")
