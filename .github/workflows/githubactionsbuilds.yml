@@ -73,6 +73,12 @@ jobs:
           mkdir -p artifacts/android
           cp app/build/outputs/apk/release/app-release.apk "artifacts/android/ExtShare-$BUILD_VERSION.apk"
 
+      - name: Show APK signing certificate
+        shell: bash
+        run: |
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          "$apksigner" verify --print-certs "artifacts/android/ExtShare-$BUILD_VERSION.apk" | grep -E "certificate DN|SHA-256"
+
       - name: Upload Android APK on every build
         uses: actions/upload-artifact@v7
         with:
@@ -83,7 +89,7 @@ jobs:
 
   release:
     needs: [generate_version_number, build]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write

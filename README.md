@@ -25,7 +25,7 @@ Output: `app/build/outputs/apk/debug/app-debug.apk`
 ### CI builds
 GitHub Actions (`.github/workflows/githubactionsbuilds.yml`) builds every push. Each run gets a build number `N` from a tag counter, producing version `1.0.N` (`versionCode = N`), and uploads `ExtShare-1.0.N.apk` as an artifact.
 
-Every push to `main` also publishes a GitHub release `1.0.N` with the APK. To sign it with your own key, add these repository secrets:
+Every push (or manual run) on `main` also publishes a GitHub release `1.0.N` with the APK. To sign it with your own key, add these repository secrets:
 - `ANDROID_KEYSTORE_BASE64` — `base64 -w0 release.keystore`
 - `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
 
