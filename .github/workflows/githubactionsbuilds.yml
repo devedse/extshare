@@ -1,0 +1,116 @@
+# Purpose: build, package, and publish ExtShare on normal CI/release runs.
+name: GitHubActionsBuilds
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  generate_version_number:
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    outputs:
+      build_number: ${{ steps.buildnumber.outputs.build_number }}
+    steps:
+      - name: Generate build number
+        id: buildnumber
+        uses: onyxmueller/build-tag-number@v1
+        with:
+          token: ${{ secrets.github_token }}
+
+  build:
+    needs: [generate_version_number]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      release_signed: ${{ steps.signing.outputs.configured }}
+    env:
+      BUILD_NUMBER: ${{ needs.generate_version_number.outputs.build_number }}
+      BUILD_VERSION: 1.0.${{ needs.generate_version_number.outputs.build_number }}
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install JDK
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Detect signing configuration
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ] && [ -n "$KEYSTORE_PASSWORD" ] && [ -n "$KEY_ALIAS" ] && [ -n "$KEY_PASSWORD" ]; then
+            echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.keystore"
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build debug-signed Android APK
+        if: steps.signing.outputs.configured != 'true'
+        shell: bash
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Build release-signed Android APK
+        if: steps.signing.outputs.configured == 'true'
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/release.keystore
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Collect APK
+        shell: bash
+        run: |
+          mkdir -p artifacts/android
+          cp app/build/outputs/apk/release/app-release.apk "artifacts/android/ExtShare-$BUILD_VERSION.apk"
+
+      - name: Upload Android APK on every build
+        uses: actions/upload-artifact@v7
+        with:
+          name: ExtShare-Android-${{ env.BUILD_VERSION }}
+          path: artifacts/android/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    needs: [generate_version_number, build]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.build.outputs.release_signed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download signed APK
+        uses: actions/download-artifact@v8
+        with:
+          name: ExtShare-Android-1.0.${{ needs.generate_version_number.outputs.build_number }}
+          path: artifacts/android
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: 1.0.${{ needs.generate_version_number.outputs.build_number }}
+          name: 1.0.${{ needs.generate_version_number.outputs.build_number }}
+          body: |
+            ${{ github.event.head_commit.message }}
+          files: |
+            artifacts/android/*.apk
+          fail_on_unmatched_files: true
+          make_latest: true

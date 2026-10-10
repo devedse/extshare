@@ -3,6 +3,13 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+// CI passes BUILD_NUMBER/BUILD_VERSION (see .github/workflows/githubactionsbuilds.yml).
+val buildNumber = System.getenv("BUILD_NUMBER")?.toIntOrNull() ?: 1
+val buildVersion = System.getenv("BUILD_VERSION") ?: "1.0.$buildNumber"
+
+// Release signing is optional; without these the release APK is signed with the debug key.
+val releaseKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let { file(it) }?.takeIf { it.exists() }
+
 android {
     namespace = "org.arnor.extshare"
     compileSdk = 35
@@ -11,14 +18,26 @@ android {
         applicationId = "org.arnor.extshare"
         minSdk = 30
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = buildNumber
+        versionName = buildVersion
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = releaseKeystore
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),

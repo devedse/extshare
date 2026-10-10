@@ -22,6 +22,15 @@ Quick Settings tile to mirror the main screen to a foldable’s external/cover d
 ```
 Output: `app/build/outputs/apk/debug/app-debug.apk`
 
+### CI builds
+GitHub Actions (`.github/workflows/githubactionsbuilds.yml`) builds every push. Each run gets a build number `N` from a tag counter, producing version `1.0.N` (`versionCode = N`), and uploads `ExtShare-1.0.N.apk` as an artifact.
+
+To get release-signed APKs and automatic GitHub releases on `main`, add these repository secrets:
+- `ANDROID_KEYSTORE_BASE64` — `base64 -w0 release.keystore`
+- `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`
+
+Without them the APK is signed with the debug key and no release is published.
+
 ### Install & Use
 1) Install the APK on your device.  
 2) Add the “Mirror screen” tile to Quick Settings.  
