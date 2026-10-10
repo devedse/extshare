@@ -22,6 +22,10 @@
             android:resizeableActivity="true"
             android:supportsPictureInPicture="true"
             android:configChanges="screenSize|smallestScreenSize|screenLayout|orientation|keyboardHidden">
+            <!-- The picture-in-picture default and pinch-to-shrink limit follow this minimum size. -->
+            <layout
+                android:minWidth="180dp"
+                android:minHeight="90dp" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
