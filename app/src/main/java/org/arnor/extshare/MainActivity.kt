@@ -39,6 +39,8 @@ class MainActivity : AppCompatActivity() {
     private var isTopResumed = false
     // Set when the cover session must wait until ExtShare is the focused app again.
     private var pendingRearStart = false
+    // Set while entering picture-in-picture before asking for one-app consent.
+    private var pendingOneAppConsent = false
 
     private val logRefresher = object : Runnable {
         override fun run() {
@@ -54,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     // Stop action shown in the picture-in-picture controls.
     private val stopReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            DebugLog.log(TAG, "Stop tapped in picture-in-picture")
+            DebugLog.log(TAG, "Stop requested via broadcast")
             stopMirroring()
         }
     }
@@ -94,7 +96,12 @@ class MainActivity : AppCompatActivity() {
         )
 
         binding.startButton.setOnClickListener {
-            requestMediaProjection()
+            val wholeScreen = TestSettings.get(this, TestSettings.WHOLE_SCREEN)
+            if (!wholeScreen && rearMirror.isAvailable && isTopResumed) {
+                startOneAppShare()
+            } else {
+                requestMediaProjection()
+            }
             renderState()
         }
 
@@ -154,6 +161,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopMirroring() {
         pendingRearStart = false
+        pendingOneAppConsent = false
         rearMirror.stop()
         MirrorService.stop(this)
         renderState()
@@ -206,6 +214,10 @@ class MainActivity : AppCompatActivity() {
         DebugLog.log(TAG, "Picture-in-picture mode=$isInPictureInPictureMode")
         binding.mainContent.visibility = if (isInPictureInPictureMode) View.GONE else View.VISIBLE
         binding.pipContent.visibility = if (isInPictureInPictureMode) View.VISIBLE else View.GONE
+        if (isInPictureInPictureMode && pendingOneAppConsent) {
+            pendingOneAppConsent = false
+            launchOneAppConsent()
+        }
         maybeReopenCover()
     }
 
@@ -246,11 +258,39 @@ class MainActivity : AppCompatActivity() {
             .onFailure { DebugLog.log(TAG, "setPictureInPictureParams failed", it) }
     }
 
-    private fun enterPip(reason: String) {
+    private fun enterPip(reason: String): Boolean {
         val entered = runCatching { enterPictureInPictureMode(pipParams()) }
             .onFailure { DebugLog.log(TAG, "enterPictureInPictureMode failed", it) }
             .getOrDefault(false)
         DebugLog.log(TAG, "Enter picture-in-picture ($reason) -> $entered")
+        return entered
+    }
+
+    /**
+     * Sharing one app makes Android open that app over ExtShare, which would end the cover session.
+     * So open the cover while ExtShare is focused, shrink to picture-in-picture, then ask for consent.
+     */
+    private fun startOneAppShare() {
+        DebugLog.log(TAG, "One-app share: opening cover and shrinking before asking for consent")
+        if (!rearMirror.start()) {
+            requestMediaProjection()
+            return
+        }
+        pendingOneAppConsent = true
+        if (!enterPip("one-app share")) {
+            pendingOneAppConsent = false
+            launchOneAppConsent()
+        }
+    }
+
+    private fun launchOneAppConsent() {
+        // A separate task: launched from our pinned task, the dialog would pull ExtShare back to full screen.
+        DebugLog.log(TAG, "Requesting one-app screen-capture consent in a separate task")
+        startActivity(
+            Intent(this, RequestPermissionActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                .putExtra(RequestPermissionActivity.EXTRA_REAR_DISPLAY, true)
+        )
     }
 
     /** Re-opens the cover session while capture is still running, e.g. after returning to ExtShare. */
@@ -273,7 +313,9 @@ class MainActivity : AppCompatActivity() {
             MirrorService.start(this, resultCode, resultData, externalSurface = true)
             // The consent result arrives before ExtShare regains focus, and Android only lets
             // the focused app switch the cover on.
-            if (isTopResumed) {
+            if (rearMirror.isActive) {
+                DebugLog.log(TAG, "Cover session already open")
+            } else if (isTopResumed) {
                 rearMirror.start()
             } else {
                 DebugLog.log(TAG, "Waiting for ExtShare to be focused before opening cover session")
@@ -369,6 +411,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "MainActivity"
         private const val REOPEN_INTERVAL_MS = 5000L
-        private const val ACTION_STOP_MIRRORING = "org.arnor.extshare.STOP_MIRRORING"
+        const val ACTION_STOP_MIRRORING = "org.arnor.extshare.STOP_MIRRORING"
     }
 }
