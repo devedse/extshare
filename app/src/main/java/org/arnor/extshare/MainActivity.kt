@@ -87,7 +87,7 @@ class MainActivity : AppCompatActivity() {
             Toast.makeText(this, "MediaProjection unavailable on this device.", Toast.LENGTH_LONG).show()
             return
         }
-        requestProjectionLauncher.launch(manager.createScreenCaptureIntent())
+        requestProjectionLauncher.launch(ProjectionStore.captureIntent(manager))
     }
 
     private fun renderState() {

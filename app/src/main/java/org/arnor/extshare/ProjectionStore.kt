@@ -1,6 +1,9 @@
 package org.arnor.extshare
 
 import android.content.Intent
+import android.media.projection.MediaProjectionConfig
+import android.media.projection.MediaProjectionManager
+import android.os.Build
 
 data class ProjectionGrant(val resultCode: Int, val dataIntent: Intent)
 
@@ -22,4 +25,12 @@ object ProjectionStore {
     fun takeGrant(): ProjectionGrant? = grant.also { grant = null }
 
     fun hasGrant(): Boolean = grant != null
+
+    /** Consent intent that captures the whole screen; without the config Android may offer only single-app sharing. */
+    fun captureIntent(manager: MediaProjectionManager): Intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            manager.createScreenCaptureIntent(MediaProjectionConfig.createConfigForDefaultDisplay())
+        } else {
+            manager.createScreenCaptureIntent()
+        }
 }
