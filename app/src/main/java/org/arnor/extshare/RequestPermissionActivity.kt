@@ -13,8 +13,7 @@ class RequestPermissionActivity : ComponentActivity() {
     private val launcher =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
-                ProjectionStore.saveGrant(result.resultCode, result.data!!)
-                MirrorService.start(this)
+                MirrorService.start(this, result.resultCode, result.data!!)
                 Toast.makeText(this, "Mirroring enabled.", Toast.LENGTH_SHORT).show()
             } else {
                 Toast.makeText(this, "Screen capture permission denied.", Toast.LENGTH_SHORT).show()

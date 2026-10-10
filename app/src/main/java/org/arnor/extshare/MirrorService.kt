@@ -53,9 +53,19 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        if (mediaProjection == null && !ProjectionStore.hasGrant()) {
-            // Also hit when the system restarts the service: consent can't be reused.
-            DebugLog.log(TAG, "No screen-capture consent available; stopping.")
+        val resultData = intent?.let {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                it.getParcelableExtra(EXTRA_RESULT_DATA, Intent::class.java)
+            } else {
+                @Suppress("DEPRECATION")
+                it.getParcelableExtra(EXTRA_RESULT_DATA)
+            }
+        }
+        if (mediaProjection == null && resultData == null) {
+            DebugLog.log(TAG, "No screen-capture consent in start intent; stopping.")
+            // startForegroundService() requires startForeground() even when bailing out.
+            runCatching { startForeground(notificationId, buildNotification()) }
+                .onFailure { DebugLog.log(TAG, "startForeground without consent failed", it) }
             stopSelf()
             return START_NOT_STICKY
         }
@@ -70,7 +80,9 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
             Log.d(TAG, "Dual screen toggle attempt: $dualMsg")
         }
         startForeground(notificationId, buildNotification())
-        startProjection()
+        if (resultData != null) {
+            startProjection(intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0, resultData)
+        }
         updateTileState()
         return START_NOT_STICKY
     }
@@ -89,17 +101,16 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    private fun startProjection() {
+    private fun startProjection(resultCode: Int, resultData: Intent) {
         if (mediaProjection != null) return
-        val grant = ProjectionStore.takeGrant()
         val manager = getSystemService(MediaProjectionManager::class.java)
-        if (grant == null || manager == null) {
-            DebugLog.log(TAG, "Missing consent or MediaProjectionManager; stopping.")
+        if (manager == null) {
+            DebugLog.log(TAG, "MediaProjectionManager unavailable; stopping.")
             stopSelf()
             return
         }
         val projection = try {
-            manager.getMediaProjection(grant.resultCode, grant.dataIntent)
+            manager.getMediaProjection(resultCode, resultData)
         } catch (t: Throwable) {
             DebugLog.log(TAG, "getMediaProjection failed", t)
             null
@@ -344,15 +355,20 @@ class MirrorService : Service(), DisplayManager.DisplayListener {
     companion object {
         private const val TAG = "MirrorService"
         private const val EXTRA_EXTERNAL_SURFACE = "external_surface"
+        private const val EXTRA_RESULT_CODE = "result_code"
+        private const val EXTRA_RESULT_DATA = "result_data"
         val isRunning: AtomicBoolean = AtomicBoolean(false)
 
         // Main-thread only: the running service and the surface handed over by RearDisplayMirror.
         private var instance: MirrorService? = null
         private var externalSurface: SurfaceHolder? = null
 
-        fun start(context: Context, externalSurface: Boolean = false) {
+        /** Starts capture with a fresh screen-capture consent result. */
+        fun start(context: Context, resultCode: Int, resultData: Intent, externalSurface: Boolean = false) {
             val intent = Intent(context, MirrorService::class.java)
                 .putExtra(EXTRA_EXTERNAL_SURFACE, externalSurface)
+                .putExtra(EXTRA_RESULT_CODE, resultCode)
+                .putExtra(EXTRA_RESULT_DATA, resultData)
             ContextCompat.startForegroundService(context, intent)
         }
 

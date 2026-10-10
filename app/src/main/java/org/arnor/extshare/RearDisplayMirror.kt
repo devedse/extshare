@@ -88,13 +88,19 @@ class RearDisplayMirror(
         if (areaToken == null || !isAvailable) return false
         testCard = test
         DebugLog.log(TAG, "Requesting rear presentation (testCard=$test)")
-        controller.presentContentOnWindowArea(
-            areaToken,
-            activity,
-            ContextCompat.getMainExecutor(activity),
-            this
-        )
-        return true
+        return try {
+            controller.presentContentOnWindowArea(
+                areaToken,
+                activity,
+                ContextCompat.getMainExecutor(activity),
+                this
+            )
+            true
+        } catch (t: Throwable) {
+            DebugLog.log(TAG, "Rear presentation request failed: ${DebugLog.describe(t)}")
+            testCard = false
+            false
+        }
     }
 
     fun stop() {

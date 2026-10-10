@@ -28,6 +28,9 @@ class MainActivity : AppCompatActivity() {
     private val handler = Handler(Looper.getMainLooper())
     private var shownLog = ""
     private var lastReopenAt = 0L
+    private var isTopResumed = false
+    // Set when the cover session must wait until ExtShare is the focused app again.
+    private var pendingRearStart = false
 
     private val logRefresher = object : Runnable {
         override fun run() {
@@ -44,8 +47,7 @@ class MainActivity : AppCompatActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode == RESULT_OK && result.data != null) {
                 DebugLog.log(TAG, "Screen-capture consent granted")
-                ProjectionStore.saveGrant(result.resultCode, result.data!!)
-                startMirroring()
+                startMirroring(result.resultCode, result.data!!)
             } else {
                 DebugLog.log(TAG, "Screen-capture consent denied")
                 Toast.makeText(this, "Permission is required to mirror the screen.", Toast.LENGTH_SHORT).show()
@@ -76,12 +78,13 @@ class MainActivity : AppCompatActivity() {
         )
 
         binding.startButton.setOnClickListener {
-            if (ProjectionStore.hasGrant()) startMirroring() else requestMediaProjection()
+            requestMediaProjection()
             renderState()
         }
 
         binding.stopButton.setOnClickListener {
             DebugLog.log(TAG, "Stop tapped")
+            pendingRearStart = false
             rearMirror.stop()
             MirrorService.stop(this)
             renderState()
@@ -153,6 +156,12 @@ class MainActivity : AppCompatActivity() {
     override fun onTopResumedActivityChanged(isTopResumedActivity: Boolean) {
         super.onTopResumedActivityChanged(isTopResumedActivity)
         DebugLog.log(TAG, "Top resumed activity=$isTopResumedActivity")
+        isTopResumed = isTopResumedActivity
+        if (isTopResumedActivity && pendingRearStart) {
+            pendingRearStart = false
+            DebugLog.log(TAG, "ExtShare is focused again; opening cover session")
+            rearMirror.start()
+        }
     }
 
     override fun onMultiWindowModeChanged(isInMultiWindowMode: Boolean, newConfig: Configuration) {
@@ -208,13 +217,20 @@ class MainActivity : AppCompatActivity() {
         rearMirror.start()
     }
 
-    private fun startMirroring() {
+    private fun startMirroring(resultCode: Int, resultData: android.content.Intent) {
         // Foldables like the Galaxy Z Fold only power the cover panel through a rear-display session.
         if (rearMirror.isAvailable) {
-            MirrorService.start(this, externalSurface = true)
-            rearMirror.start()
+            MirrorService.start(this, resultCode, resultData, externalSurface = true)
+            // The consent result arrives before ExtShare regains focus, and Android only lets
+            // the focused app switch the cover on.
+            if (isTopResumed) {
+                rearMirror.start()
+            } else {
+                DebugLog.log(TAG, "Waiting for ExtShare to be focused before opening cover session")
+                pendingRearStart = true
+            }
         } else {
-            MirrorService.start(this)
+            MirrorService.start(this, resultCode, resultData)
         }
     }
 

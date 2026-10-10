@@ -34,6 +34,12 @@ object DebugLog {
         file?.let { f -> runCatching { f.writeText(lines.joinToString("\n")) } }
     }
 
+    /** Exception summary with its cause chain and the top frames of each. */
+    fun describe(t: Throwable): String = generateSequence(t) { it.cause }.take(4).joinToString(" <- caused by ") { e ->
+        val frames = e.stackTrace.take(3).joinToString(" / ") { "${it.className.substringAfterLast('.')}.${it.methodName}:${it.lineNumber}" }
+        "${e.javaClass.name}: ${e.message?.take(200)} [$frames]"
+    }
+
     @Synchronized
     fun clear() {
         lines.clear()

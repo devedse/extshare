@@ -1,6 +1,8 @@
 package org.arnor.extshare
 
+import android.app.PendingIntent
 import android.content.Intent
+import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
 
@@ -8,23 +10,22 @@ class MirrorTileService : TileService() {
 
     override fun onClick() {
         super.onClick()
-        val tile = qsTile ?: return
-        val hasGrant = ProjectionStore.hasGrant()
-
         if (MirrorService.isRunning.get()) {
             MirrorService.stop(this)
-        } else {
-            if (hasGrant) {
-                MirrorService.start(this)
-            } else {
-                val intent = Intent(this, RequestPermissionActivity::class.java).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-                startActivityAndCollapse(intent)
-                return
-            }
+            updateTileState()
+            return
         }
-        updateTileState()
+        // Every start needs fresh screen-capture consent.
+        val intent = Intent(this, RequestPermissionActivity::class.java)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // The Intent overload throws for apps targeting Android 14+.
+            val pending = PendingIntent.getActivity(this, 0, intent, PendingIntent.FLAG_IMMUTABLE)
+            startActivityAndCollapse(pending)
+        } else {
+            @Suppress("DEPRECATION")
+            startActivityAndCollapse(intent)
+        }
     }
 
     override fun onStartListening() {
