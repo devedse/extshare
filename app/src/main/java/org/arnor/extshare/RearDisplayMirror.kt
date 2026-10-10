@@ -23,6 +23,9 @@ import androidx.window.area.WindowAreaPresentationSessionCallback
 import androidx.window.area.WindowAreaSessionPresenter
 import androidx.window.core.ExperimentalWindowApi
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Shows the mirror on the rear (cover) panel using Jetpack WindowManager's "dual screen"
@@ -42,6 +45,8 @@ class RearDisplayMirror(
     private val controller = WindowAreaController.getOrCreate()
     private var token: Binder? = null
     private var session: WindowAreaSessionPresenter? = null
+    // True while the session shows the diagnostic test card instead of the mirror.
+    private var testCard = false
 
     var status: WindowAreaCapability.Status? = null
         private set
@@ -72,10 +77,17 @@ class RearDisplayMirror(
 
     fun describe(): String = "Rear display presentation (WindowAreaController): ${status ?: "unknown"}"
 
-    fun start(): Boolean {
+    fun start(): Boolean = open(test = false)
+
+    /** Shows a bright test card on the cover for a few seconds, without screen capture. */
+    fun startTestCard(): Boolean = session == null && open(test = true)
+
+    private fun open(test: Boolean): Boolean {
         val areaToken = token
         if (session != null) return true
         if (areaToken == null || !isAvailable) return false
+        testCard = test
+        DebugLog.log(TAG, "Requesting rear presentation (testCard=$test)")
         controller.presentContentOnWindowArea(
             areaToken,
             activity,
@@ -90,8 +102,12 @@ class RearDisplayMirror(
     }
 
     override fun onSessionStarted(session: WindowAreaSessionPresenter) {
-        DebugLog.log(TAG, "Rear presentation session started")
+        DebugLog.log(TAG, "Rear presentation session started (testCard=$testCard)")
         this.session = session
+        if (testCard) {
+            showTestCard(session)
+            return
+        }
         val surfaceView = SurfaceView(session.context)
         surfaceView.holder.setFormat(PixelFormat.RGBA_8888)
         surfaceView.holder.addCallback(object : SurfaceHolder.Callback {
@@ -125,11 +141,28 @@ class RearDisplayMirror(
         onChanged()
     }
 
+    private fun showTestCard(session: WindowAreaSessionPresenter) {
+        val card = TextView(session.context).apply {
+            text = "ExtShare test card\n${SimpleDateFormat("HH:mm:ss", Locale.US).format(Date())}"
+            textSize = 32f
+            gravity = Gravity.CENTER
+            setTextColor(Color.WHITE)
+            setBackgroundColor(Color.MAGENTA)
+        }
+        session.setContentView(card)
+        card.postDelayed({ session.close() }, TEST_CARD_MS)
+        onChanged()
+    }
+
     override fun onSessionEnded(t: Throwable?) {
         DebugLog.log(TAG, "Rear presentation session ended", t)
         session = null
-        MirrorService.detachExternalSurface()
-        onEnded()
+        if (testCard) {
+            testCard = false
+        } else {
+            MirrorService.detachExternalSurface()
+            onEnded()
+        }
         onChanged()
     }
 
@@ -139,5 +172,6 @@ class RearDisplayMirror(
 
     companion object {
         private const val TAG = "RearDisplayMirror"
+        const val TEST_CARD_MS = 8000L
     }
 }

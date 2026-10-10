@@ -124,7 +124,16 @@ class MainActivity : AppCompatActivity() {
         val details = "${rearMirror.describe()}\n${probe.report}"
 
         if (rearMirror.isAvailable) {
-            setTestResult("Cover display is reachable via rear-display presentation; Start mirroring will use it.\n$details\n$methodDetails")
+            val message = when {
+                rearMirror.isActive -> "A cover session is already running; stop mirroring first to run the test."
+                rearMirror.startTestCard() -> "Showing a magenta test card on the cover for ${RearDisplayMirror.TEST_CARD_MS / 1000} seconds."
+                else -> "Could not request a cover session."
+            }
+            setTestResult("$message\n$details\n$methodDetails")
+            // Refresh once the session has had time to start/end so its events show up.
+            Handler(Looper.getMainLooper()).postDelayed({
+                setTestResult("$message\n$details\nRecent events:\n${DebugLog.dump()}")
+            }, 3000)
             return
         }
 
